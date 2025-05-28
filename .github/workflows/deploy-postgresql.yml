@@ -35,3 +35,13 @@ jobs:
             -e POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
             -p 5432:5432 \
             postgres:15
+        
+          # Esperar a que PostgreSQL esté listo
+          echo "Esperando a que PostgreSQL esté listo..."
+          sleep 30
+            
+          # Verificar que el contenedor está corriendo
+          docker ps | grep postgresql-dev
+          
+          # Verificar conectividad a PostgreSQL
+          docker exec postgresql-dev pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}
