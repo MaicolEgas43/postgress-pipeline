@@ -22,6 +22,10 @@ jobs:
       uses: webfactory/ssh-agent@v0.6.0
       with:
         ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+    - name: Debug SSH Key Permissions
+      run: |
+        chmod 600 ~/.ssh/id_rsa
+        ls -l ~/.ssh/id_rsa
 
     - name: SSH into EC2 and deploy container
       uses: appleboy/ssh-action@v0.1.10
