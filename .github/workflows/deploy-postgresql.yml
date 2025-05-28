@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-
     - name: Set up SSH agent
       uses: webfactory/ssh-agent@v0.6.0
       with:
@@ -27,13 +26,18 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         ls -l ~/.ssh/id_rsa
 
-    - name: SSH into EC2 and deploy container
-      uses: appleboy/ssh-action@v0.1.10
+    - name: Deploy PostgreSQL to EC2
+      uses: appleboy/ssh-action@v1.0.10
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        script: |          
+        script: |
+          # Detener y eliminar contenedor existente si existe
+          docker stop postgresql-dev 2>/dev/null || true
+          docker rm postgresql-dev 2>/dev/null || true
+          
+          # Ejecutar nuevo contenedor PostgreSQL
           docker run -d \
             --name postgresql-dev \
             -e POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
