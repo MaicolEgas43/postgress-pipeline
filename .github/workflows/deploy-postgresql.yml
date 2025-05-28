@@ -17,15 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Set up SSH agent
-      uses: webfactory/ssh-agent@v0.6.0
-      with:
-        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
-    - name: Debug SSH Key Permissions
-      run: |
-        chmod 600 ~/.ssh/id_rsa
-        ls -l ~/.ssh/id_rsa
-
     - name: Deploy PostgreSQL to EC2
       uses: appleboy/ssh-action@v1.0.10
       with:
@@ -45,23 +36,3 @@ jobs:
             -e POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
             -p 5432:5432 \
             postgres:15
-          
-          # Esperar a que PostgreSQL esté listo
-          echo "Esperando a que PostgreSQL esté listo..."
-          sleep 30
-          
-          # Verificar que el contenedor está corriendo
-          docker ps | grep postgresql-dev
-          
-          # Verificar conectividad a PostgreSQL
-          docker exec postgresql-dev pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}
-          
-          # Verificación adicional
-          echo "=== Estado del contenedor PostgreSQL ==="
-          docker ps -f name=postgresql-dev
-          
-          echo "=== Logs del contenedor ==="
-          docker logs postgresql-dev --tail 10
-          
-          echo "=== Verificación de conectividad ==="
-          docker exec postgresql-dev psql -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }} -c "SELECT version();" 
