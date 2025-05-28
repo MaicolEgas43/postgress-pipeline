@@ -17,6 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+
+    - name: Set up SSH agent
+      uses: webfactory/ssh-agent@v0.6.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
     - name: SSH into EC2 and deploy container
       uses: appleboy/ssh-action@v0.1.10
       with:
