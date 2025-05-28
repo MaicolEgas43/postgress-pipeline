@@ -10,6 +10,21 @@ on:
         type: choice
         options:
           - dev
+          - staging
+      sql_file:
+        description: 'SQL file to execute (without .sql extension)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - schema
+          - data
+          - all
+  push:
+    branches:
+      - main
+    paths:
+      - 'sql/**'
 
 jobs:
   deploy-postgresql:
@@ -17,17 +32,12 @@ jobs:
     
     steps:
     - name: Deploy PostgreSQL to EC2
-      uses: appleboy/ssh-action@v1.0.3
+      uses: appleboy/ssh-action@v1.0.10
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          echo "=== Iniciando despliegue de PostgreSQL ==="
-          
-          # Detener y eliminar contenedor existente si existe
-          docker stop postgresql-dev 2>/dev/null || true
-          docker rm postgresql-dev 2>/dev/null || true
+        script: |          
           docker run -d \
             --name postgresql-dev \
             -e POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
@@ -35,13 +45,125 @@ jobs:
             -e POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
             -p 5432:5432 \
             postgres:15
-        
+          
           # Esperar a que PostgreSQL esté listo
           echo "Esperando a que PostgreSQL esté listo..."
           sleep 30
-            
+          
           # Verificar que el contenedor está corriendo
           docker ps | grep postgresql-dev
           
           # Verificar conectividad a PostgreSQL
           docker exec postgresql-dev pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}
+          
+          # Mostrar estado final
+          echo "=== Estado del contenedor PostgreSQL ==="
+          docker ps -f name=postgresql-dev
+          
+          echo "=== Logs del contenedor ==="
+          docker logs postgresql-dev --tail 10
+          
+          echo "=== Verificación de conectividad ==="
+          docker exec postgresql-dev psql -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }} -c "SELECT version();"
+          - name: Load SQL Data to PostgreSQL
+          uses: appleboy/ssh-action@v1.0.3
+          with:
+            host: ${{ secrets.EC2_HOST }}
+            username: ${{ secrets.EC2_USER }}
+            key: ${{ secrets.EC2_SSH_KEY }}
+            script: |
+              # Verificar que PostgreSQL esté corriendo
+              if ! docker ps | grep -q postgresql-dev; then
+                echo "Error: PostgreSQL container 'postgresql-dev' is not running"
+                echo "Please run the 'Deploy PostgreSQL to EC2' workflow first"
+                exit 1
+              fi
+              
+              echo "PostgreSQL container is running"
+              docker ps -f name=postgresql-dev
+              
+              # Crear directorio temporal
+              mkdir -p ~/sql_temp
+        
+    - name: Copy SQL files to EC2
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "sql/*"
+        target: "~/sql_temp/"
+            
+    - name: Execute SQL files
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          # Copiar archivos SQL al contenedor PostgreSQL
+          docker cp ~/sql_temp/sql/. postgresql-dev:/sql/
+          
+          # Verificar que los archivos se copiaron correctamente
+          echo "Archivos SQL en el contenedor:"
+          docker exec postgresql-dev ls -la /sql/
+          
+          # Función para ejecutar un archivo SQL
+          execute_sql_file() {
+                local file=$1
+                echo "Ejecutando archivo SQL: $file"
+                
+                if docker exec postgresql-dev test -f "/sql/$file"; then
+                  docker exec -i postgresql-dev psql \
+                    -U ${{ secrets.POSTGRES_USER }} \
+                    -d ${{ secrets.POSTGRES_DB }} \
+                    -f "/sql/$file"
+                  echo "✅ Archivo $file ejecutado exitosamente"
+                else
+                  echo "⚠️  Archivo $file no encontrado, saltando..."
+                fi
+              }
+              
+              # Determinar qué archivos ejecutar basado en el input
+              case "${{ github.event.inputs.sql_file || 'all' }}" in
+                "schema")
+                  execute_sql_file "schema.sql"
+                  ;;
+                "data")
+                  execute_sql_file "data.sql"
+                  ;;
+                "all"|*)
+                  # Ejecutar en orden: schema primero, luego data
+                  execute_sql_file "schema.sql"
+                  execute_sql_file "data.sql"
+                  
+                  # Ejecutar cualquier otro archivo SQL encontrado
+                  for sql_file in $(docker exec postgresql-dev find /sql -name "*.sql" -not -name "schema.sql" -not -name "data.sql" | sort); do
+                    file_name=$(basename "$sql_file")
+                    execute_sql_file "$file_name"
+                  done
+                  ;;
+              esac
+              
+              # Verificar carga de datos
+              echo "=== Verificando carga de datos ==="
+              
+              # Listar todas las tablas
+              echo "Tablas en la base de datos:"
+              docker exec postgresql-dev psql \
+                -U ${{ secrets.POSTGRES_USER }} \
+                -d ${{ secrets.POSTGRES_DB }} \
+                -c "\dt"
+              
+              # Si existe la tabla estudiantes, mostrar algunos datos
+              if docker exec postgresql-dev psql -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }} -c "\dt" | grep -q estudiantes; then
+                echo "Datos en la tabla estudiantes:"
+                docker exec postgresql-dev psql \
+                  -U ${{ secrets.POSTGRES_USER }} \
+                  -d ${{ secrets.POSTGRES_DB }} \
+                  -c "SELECT * FROM estudiantes LIMIT 10;"
+              fi
+              
+              # Limpiar archivos temporales
+              rm -rf ~/sql_temp
+              echo "Archivos temporales limpiados" 
