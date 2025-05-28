@@ -1,0 +1,68 @@
+name: Deploy PostgreSQL to EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: false
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+
+jobs:
+  deploy-postgresql:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+        
+    - name: Connect to EC2 and deploy PostgreSQL
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          # Detener y eliminar contenedor existente si existe
+          docker stop postgresql-dev 2>/dev/null || true
+          docker rm postgresql-dev 2>/dev/null || true
+          
+          # Ejecutar nuevo contenedor PostgreSQL
+          docker run -d \
+            --name postgresql-dev \
+            -e POSTGRES_USER=${{ secrets.POSTGRES_USER }} \
+            -e POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }} \
+            -e POSTGRES_DB=${{ secrets.POSTGRES_DB }} \
+            -p 5432:5432 \
+            postgres:15
+          
+          # Esperar a que PostgreSQL esté listo
+          echo "Esperando a que PostgreSQL esté listo..."
+          sleep 30
+          
+          # Verificar que el contenedor está corriendo
+          docker ps | grep postgresql-dev
+          
+          # Verificar conectividad a PostgreSQL
+          docker exec postgresql-dev pg_isready -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }}
+        EOF
+        
+    - name: Verify deployment
+      run: |
+        ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          echo "=== Estado del contenedor PostgreSQL ==="
+          docker ps -f name=postgresql-dev
+          
+          echo "=== Logs del contenedor ==="
+          docker logs postgresql-dev --tail 10
+          
+          echo "=== Verificación de conectividad ==="
+          docker exec postgresql-dev psql -U ${{ secrets.POSTGRES_USER }} -d ${{ secrets.POSTGRES_DB }} -c "SELECT version();"
+        EOF 
