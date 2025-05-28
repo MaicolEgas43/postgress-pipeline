@@ -1,4 +1,4 @@
-name: Load SQL Data to PostgreSQL
+name: Deploy PostgreSQL to EC2
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
           - dev
 
 jobs:
-  load-sql-data:
+  deploy-postgresql:
     runs-on: ubuntu-latest
     
     steps:
